@@ -110,7 +110,10 @@ class katana(HttpCrawler):
             "go install -v github.com/projectdiscovery/katana/cmd/katana@latest"
         )
     else:
-        install_cmd = "sudo apt install build-essential && go install -v github.com/projectdiscovery/katana/cmd/katana@latest"
+        install_cmd = (
+            "sudo apt install build-essential && "
+            "go install -v github.com/projectdiscovery/katana/cmd/katana@latest"
+        )
     install_github_handle = "projectdiscovery/katana"
     proxychains = False
     proxy_socks5 = True
@@ -173,5 +176,7 @@ class katana(HttpCrawler):
             self.reports_folder + "/index.txt"
         ):
             os.remove(self.reports_folder + "/index.txt")
+
+
 
 
