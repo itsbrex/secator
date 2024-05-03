@@ -109,14 +109,24 @@ class nmap(VulnMulti):
             "sudo mkdir -p $(brew --prefix nmap)/share/nmap/scripts/vulscan && "
             "sudo chown $USER $(brew --prefix nmap)/share/nmap/scripts/vulscan && "
             "ls -l $(brew --prefix nmap)/share/nmap/scripts/vulscan; "
-            "ln -s /opt/scipag_vulscan $(brew --prefix nmap)/share/nmap/scripts/vulscan; "
+            "ln -s /opt/scipag_vulscan/vulscan.nse $(brew --prefix nmap)/share/nmap/scripts/vulscan || echo 'Link already exists'; "
+            "else "
+            "echo 'Vulscan is already up to date.'; "
             "fi"
         )
     else:
         install_cmd = (
             "sudo apt install -y nmap && "
-            "sudo git clone https://github.com/scipag/vulscan /opt/scipag_vulscan || true && "
-            "sudo ln -s /opt/scipag_vulscan /usr/share/nmap/scripts/vulscan || true"
+            "if [ ! -d '/opt/scipag_vulscan' ]; then "
+            "sudo git clone https://github.com/scipag/vulscan /opt/scipag_vulscan; "
+            "else "
+            "cd /opt/scipag_vulscan && sudo git pull; "
+            "fi; "
+            "if [ ! -L /usr/share/nmap/scripts/vulscan ]; then "
+            "sudo ln -s /opt/scipag_vulscan /usr/share/nmap/scripts/vulscan || echo 'Link already exists'; "
+            "else "
+            "echo 'Vulscan is already up to date.'; "
+            "fi"
         )
     proxychains = True
     proxychains_flavor = "proxychains4"
@@ -125,35 +135,35 @@ class nmap(VulnMulti):
     profile = "io"
 
     @staticmethod
-    def on_init(self):
-        output_path = self.get_opt_value(OUTPUT_PATH)
-        if not output_path:
-            output_path = f"{self.reports_folder}/.outputs/{self.unique_name}.xml"
-        self.output_path = output_path
-        self.cmd += f" -oX {self.output_path}"
+    def on_init(instance):
+        output_path = instance.get_opt_value(OUTPUT_PATH) or f"{instance.reports_folder}/.outputs/{instance.unique_name}.xml"
+        setattr(instance, 'output_path', output_path)
+
+        script = instance.get_opt_value(SCRIPT) or "vulners"  # Ensure there's a default script or fetch from options
+        instance.cmd += f" -oX {getattr(instance, 'output_path')} --script={script}"
 
     def yielder(self):
         yield from super().yielder()
         if self.return_code != 0:
             return
         self.results = []
-        note = f"nmap XML results saved to {self.output_path}"
+        note = f"nmap XML results saved to {getattr(self, 'output_path')}"
         if self.print_line:
             self._print(note)
-        if os.path.exists(self.output_path):
-            nmap_data = self.xml_to_json()
-            yield from nmap_data
+        if os.path.exists(getattr(self, 'output_path')):
+            yield from self.xml_to_json()
+
 
     def xml_to_json(self):
         results = []
-        with open(self.output_path, "r") as f:
+        with open(getattr(self, 'output_path'), "r") as f:
             content = f.read()
             try:
                 results = xmltodict.parse(content)  # parse XML to dict
             except Exception as e:
                 logger.exception(e)
                 logger.error(
-                    f"Cannot parse nmap XML output {self.output_path} to valid JSON."
+                    f"Cannot parse nmap XML output {getattr(self, 'output_path')} to valid JSON."
                 )
         results["_host"] = self.input
         return nmapData(results)
@@ -192,8 +202,7 @@ class nmapData(dict):
                 # Get script output
                 scripts = self._get_scripts(port)
 
-                # Yield port data
-                port = {
+                yield {
                     PORT: port_number,
                     HOST: hostname,
                     STATE: state,
@@ -201,8 +210,6 @@ class nmapData(dict):
                     IP: ip,
                     EXTRA_DATA: extra_data,
                 }
-                yield port
-
                 # Parse each script output to get vulns
                 for script in scripts:
                     script_id = script["id"]
@@ -303,7 +310,7 @@ class nmapData(dict):
             extra_data["version_exact"] = version_exact
 
         # Grap service name
-        product = extra_data.get("name", None) or extra_data.get("product", None)
+        product = extra_data.get("name") or extra_data.get("product")
         if product:
             service_name = product
             if version:
@@ -330,7 +337,7 @@ class nmapData(dict):
         # Build custom CPE
         if product and version:
             vsplit = version.split("-")
-            version_cpe = vsplit[0] if not version_exact else version
+            version_cpe = version if version_exact else vsplit[0]
             cpe = VulnMulti.create_cpe_string(product, version_cpe)
             if cpe not in cpes:
                 cpes.append(cpe)
@@ -351,7 +358,7 @@ class nmapData(dict):
     # --------------#
     # VULN PARSERS #
     # --------------#
-    def _parse_vulscan_output(self, out, cpes=[]):
+    def _parse_vulscan_output(self, out, cpes=None):
         """Parse nmap vulscan script output.
 
         Args:
@@ -360,6 +367,8 @@ class nmapData(dict):
         Returns:
             list: List of Vulnerability dicts.
         """
+        if cpes is None:
+            cpes = []
         provider_name = ""
         for line in out.splitlines():
             if not line:
@@ -381,9 +390,8 @@ class nmapData(dict):
                 TAGS: [vuln_id, provider_name],
             }
             if provider_name == "MITRE CVE":
-                data = VulnMulti.lookup_cve(vuln["id"], cpes=cpes)
-                if data:
-                    vuln.update(data)
+                if data := VulnMulti.lookup_cve(vuln["id"], cpes=cpes):
+                    vuln |= data
                 yield vuln
             else:
                 debug(
@@ -408,23 +416,14 @@ class nmapData(dict):
                 # TODO: Implement exploit processing
                 exploit_id, cvss_score, reference_url, _ = elems
                 name = exploit_id
-                # edb_id = name.split(':')[-1] if 'EDB-ID' in name else None
-                vuln = {
-                    ID: exploit_id,
+                yield {
+                    ID: name,
                     NAME: name,
                     PROVIDER: provider_name,
                     REFERENCE: reference_url,
                     "_type": "exploit",
-                    TAGS: [exploit_id, provider_name],
-                    # CVSS_SCORE: cvss_score,
-                    # CONFIDENCE: 'low'
+                    TAGS: [name, provider_name],
                 }
-                # TODO: lookup exploit in ExploitDB to find related CVEs
-                # if edb_id:
-                #   print(edb_id)
-                #   vuln_data = VulnMulti.lookup_exploitdb(edb_id)
-                yield vuln
-
             elif len(elems) == 3:  # vuln
                 vuln_id, vuln_cvss, reference_url = tuple(line.split("\t"))
                 vuln_cvss = float(vuln_cvss)
@@ -440,11 +439,10 @@ class nmapData(dict):
                     TAGS: [vuln_id, provider_name],
                     CONFIDENCE: "low",
                 }
-                if vuln_type == "CVE" or vuln_type == "PRION:CVE":
+                if vuln_type in ["CVE", "PRION:CVE"]:
                     vuln[TAGS].append("cve")
-                    data = VulnMulti.lookup_cve(vuln_id, cpes=cpes)
-                    if data:
-                        vuln.update(data)
+                    if data := VulnMulti.lookup_cve(vuln_id, cpes=cpes):
+                        vuln |= data
                     yield vuln
                 else:
                     debug(
