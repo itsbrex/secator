@@ -89,30 +89,20 @@ class katana(HttpCrawler):
             TIME: "timestamp",
             METHOD: lambda x: x["request"]["method"],
             STATUS_CODE: lambda x: x["response"].get("status_code"),
-            CONTENT_TYPE: lambda x: x["response"]
-            .get("headers", {})
-            .get("content_type", ";")
-            .split(";")[0],
-            CONTENT_LENGTH: lambda x: x["response"]
-            .get("headers", {})
-            .get("content_length", 0),
+            CONTENT_TYPE: lambda x: x["response"].get("headers", {}).get("content_type", ";").split(";")[0],
+            CONTENT_LENGTH: lambda x: x["response"].get("headers", {}).get("content_length", 0),
             WEBSERVER: lambda x: x["response"].get("headers", {}).get("server", ""),
             TECH: lambda x: x["response"].get("technologies", []),
-            STORED_RESPONSE_PATH: lambda x: x["response"].get(
-                "stored_response_path", ""
-            ),
+            STORED_RESPONSE_PATH: lambda x: x["response"].get("stored_response_path", ""),
             # TAGS: lambda x: x['response'].get('server')
         }
     }
     item_loaders = []
     if platform.system() == "Darwin":
-        install_cmd = (
-            "go install -v github.com/projectdiscovery/katana/cmd/katana@latest"
-        )
+        install_cmd = "go install -v github.com/projectdiscovery/katana/cmd/katana@latest"
     else:
         install_cmd = (
-            "sudo apt install build-essential && "
-            "go install -v github.com/projectdiscovery/katana/cmd/katana@latest"
+            "sudo apt install build-essential && " "go install -v github.com/projectdiscovery/katana/cmd/katana@latest"
         )
     install_github_handle = "projectdiscovery/katana"
     proxychains = False
@@ -127,9 +117,7 @@ class katana(HttpCrawler):
         except json.JSONDecodeError:
             return None
 
-        # form detection
-        forms = item.get("response", {}).get("forms", [])
-        if forms:
+        if forms := item.get("response", {}).get("forms", []):
             for form in forms:
                 method = form["method"]
                 yield Url(
@@ -150,8 +138,7 @@ class katana(HttpCrawler):
 
     @staticmethod
     def on_init(self):
-        debug_resp = self.get_opt_value("debug_resp")
-        if debug_resp:
+        if debug_resp := self.get_opt_value("debug_resp"):
             self.cmd = self.cmd.replace("-silent", "")
         if CONFIG.http.store_responses:
             self.cmd += f" -sr -srd {self.reports_folder}"
@@ -173,10 +160,6 @@ class katana(HttpCrawler):
     @staticmethod
     def on_end(self):
         if CONFIG.http.store_responses and os.path.exists(
-            self.reports_folder + "/index.txt"
+            f"{self.reports_folder}/index.txt"
         ):
-            os.remove(self.reports_folder + "/index.txt")
-
-
-
-
+            os.remove(f"{self.reports_folder}/index.txt")
