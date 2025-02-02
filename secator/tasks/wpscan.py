@@ -226,8 +226,7 @@ class wpscan(VulnHttp):
     @staticmethod
     def on_init(instance):
         output_path = (
-            instance.get_opt_value(OUTPUT_PATH)
-            or f"{instance.reports_folder}/.outputs/{instance.unique_name}.json"
+            instance.get_opt_value(OUTPUT_PATH) or f"{instance.reports_folder}/.outputs/{instance.unique_name}.json"
         )
         instance.output_path = output_path
         instance.cmd += f" -o {instance.output_path}"
