@@ -94,9 +94,7 @@ class nmap(VulnMulti):
         PORTS: "-p",
         "output_path": "-oX",
     }
-    opt_value_map = {
-        PORTS: lambda x: ",".join([str(p) for p in x]) if isinstance(x, list) else x
-    }
+    opt_value_map = {PORTS: lambda x: ",".join([str(p) for p in x]) if isinstance(x, list) else x}
     if platform.system() == "Darwin":
         install_cmd = (
             "if [ ! -d '/opt/scipag_vulscan' ]; then "
@@ -109,7 +107,8 @@ class nmap(VulnMulti):
             "sudo mkdir -p $(brew --prefix nmap)/share/nmap/scripts/vulscan && "
             "sudo chown $USER $(brew --prefix nmap)/share/nmap/scripts/vulscan && "
             "ls -l $(brew --prefix nmap)/share/nmap/scripts/vulscan; "
-            "ln -s /opt/scipag_vulscan/vulscan.nse $(brew --prefix nmap)/share/nmap/scripts/vulscan || echo 'Link already exists'; "
+            "ln -s /opt/scipag_vulscan/vulscan.nse "
+            "$(brew --prefix nmap)/share/nmap/scripts/vulscan || echo 'Link already exists'; "
             "else "
             "echo 'Vulscan is already up to date.'; "
             "fi"
@@ -136,8 +135,10 @@ class nmap(VulnMulti):
 
     @staticmethod
     def on_init(instance):
-        output_path = instance.get_opt_value(OUTPUT_PATH) or f"{instance.reports_folder}/.outputs/{instance.unique_name}.xml"
-        setattr(instance, 'output_path', output_path)
+        output_path = (
+            instance.get_opt_value(OUTPUT_PATH) or f"{instance.reports_folder}/.outputs/{instance.unique_name}.xml"
+        )
+        setattr(instance, "output_path", output_path)
 
         script = instance.get_opt_value(SCRIPT) or "vulners"  # Ensure there's a default script or fetch from options
         instance.cmd += f" -oX {getattr(instance, 'output_path')} --script={script}"
@@ -150,21 +151,18 @@ class nmap(VulnMulti):
         note = f"nmap XML results saved to {getattr(self, 'output_path')}"
         if self.print_line:
             self._print(note)
-        if os.path.exists(getattr(self, 'output_path')):
+        if os.path.exists(getattr(self, "output_path")):
             yield from self.xml_to_json()
-
 
     def xml_to_json(self):
         results = []
-        with open(getattr(self, 'output_path'), "r") as f:
+        with open(getattr(self, "output_path"), "r") as f:
             content = f.read()
             try:
                 results = xmltodict.parse(content)  # parse XML to dict
             except Exception as e:
                 logger.exception(e)
-                logger.error(
-                    f"Cannot parse nmap XML output {getattr(self, 'output_path')} to valid JSON."
-                )
+                logger.error(f"Cannot parse nmap XML output {getattr(self, 'output_path')} to valid JSON.")
         results["_host"] = self.input
         return nmapData(results)
 
@@ -239,10 +237,7 @@ class nmapData(dict):
                         if "cpe-match" in vuln[TAGS]:
                             confidence = "high" if version_exact else "medium"
                         vuln[CONFIDENCE] = confidence
-                        if (
-                            CONFIG.runners.skip_cve_low_confidence
-                            and vuln[CONFIDENCE] == "low"
-                        ):
+                        if CONFIG.runners.skip_cve_low_confidence and vuln[CONFIDENCE] == "low":
                             debug(f"{vuln[ID]}: ignored (low confidence).", sub="cve")
                             continue
                         yield vuln
@@ -394,9 +389,7 @@ class nmapData(dict):
                     vuln |= data
                 yield vuln
             else:
-                debug(
-                    f"Vulscan provider {provider_name} is not supported YET.", sub="cve"
-                )
+                debug(f"Vulscan provider {provider_name} is not supported YET.", sub="cve")
                 continue
 
     def _parse_vulners_output(self, out, **kwargs):
