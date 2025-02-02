@@ -48,7 +48,7 @@ class feroxbuster(HttpFuzzer):
     json_flag = "--json"
     opt_prefix = "--"
     opts = {
-        # 'auto_tune': {'is_flag': True, 'default': False, 'help': 'Automatically lower scan rate when too many errors'},
+        # 'auto_tune': {'is_flag': True, 'default': False, 'help': 'Automatically lower scan rate when too many errors'}
         "extract_links": {
             "is_flag": True,
             "default": False,
@@ -116,9 +116,7 @@ class feroxbuster(HttpFuzzer):
 
     @staticmethod
     def on_init(self):
-        self.output_path = self.get_opt_value(OUTPUT_PATH)
-        if not self.output_path:
-            self.output_path = f"{self.reports_folder}/.outputs/{self.unique_name}.json"
+        self.output_path = self.get_opt_value(OUTPUT_PATH) or f"{self.reports_folder}/.outputs/{self.unique_name}.json"
         Path(self.output_path).touch()
         self.cmd += f" --output {self.output_path}"
 
@@ -132,4 +130,3 @@ class feroxbuster(HttpFuzzer):
     @staticmethod
     def validate_item(self, item):
         return item["type"] == "response"
-
