@@ -59,9 +59,15 @@ class naabu(ReconPort):
     }
     output_types = [Port]
     if platform.system() == "Darwin":
-        install_cmd = "brew install libpcap && go install -v github.com/projectdiscovery/naabu/v2/cmd/naabu@latest"
+        install_cmd = (
+            "brew install libpcap && "
+            "go install -v github.com/projectdiscovery/naabu/v2/cmd/naabu@latest"
+        )
     else:
-        install_cmd = "sudo apt install -y build-essential libpcap-dev && go install -v github.com/projectdiscovery/naabu/v2/cmd/naabu@latest"
+        install_cmd = (
+            "sudo apt install -y build-essential libpcap-dev && "
+            "go install -v github.com/projectdiscovery/naabu/v2/cmd/naabu@latest"
+        )
     install_github_handle = "projectdiscovery/naabu"
     proxychains = False
     proxy_socks5 = True
