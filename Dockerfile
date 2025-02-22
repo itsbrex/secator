@@ -1,51 +1,33 @@
-FROM kalilinux/kali-rolling
+FROM alpine:latest AS builder
 
-ENV PATH="${PATH}:/root/go/bin:/root/.local/bin"
-
-RUN apt update -y && \
-    apt install -y \
-	curl \
+ENV PATH="${PATH}:/root/.local/bin"
+RUN apk add --no-cache \
+	flock \
 	gcc \
-	git \
-	golang-go \
-    make \
+	musl-dev \
+	linux-headers \
 	pipx \
-	python3 \
-	python3-pip \
-	python3-venv \
-	ruby-full \
-	rubygems \
-	sudo \
-	vim \
-    wget \
-	chromium \
-    jq \
-    openssl \
-	proxychains \
-	proxychains-ng
-
-# Install Metasploit framework
-RUN curl https://raw.githubusercontent.com/rapid7/metasploit-omnibus/master/config/templates/metasploit-framework-wrappers/msfupdate.erb > msfinstall
-RUN chmod 755 msfinstall
-RUN ./msfinstall
-
-# Copy code
+	python3-dev
+COPY . /code
 WORKDIR /code
-COPY . /code/
 
-# Install secator
-RUN pipx install .
-# RUN secator install tools wpscan
-# RUN secator install tools
-RUN secator install addons worker
-RUN secator install addons gdrive
-RUN secator install addons gcs
-RUN secator install addons mongodb
-RUN secator install addons redis
-RUN secator install addons dev
+RUN pipx install --pip-args="--no-cache-dir" . && \
+	secator install addons worker && \
+	secator install addons gdrive && \
+	secator install addons gcs && \
+	secator install addons mongodb && \
+	secator install addons redis && \
+	secator install addons dev
 
-# Cleanup
-RUN rm -rf /var/lib/apt/lists/*
-
-# Set entrypoint
+FROM python:3.12-alpine
+ARG flavor=full
+ENV TERM="xterm-256color"
+ENV PATH="${PATH}:/root/.local/bin"
+ENV GOBIN="/root/.local/bin"
+COPY --from=builder /root/.local /root/.local
+RUN apk add --no-cache \
+	flock \
+	pipx \
+	sudo
+RUN if [ "$flavor" != "lite" ]; then secator install tools --cleanup; fi
 ENTRYPOINT ["secator"]

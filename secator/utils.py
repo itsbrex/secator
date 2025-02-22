@@ -373,7 +373,7 @@ def rich_to_ansi(text):
 		str: Converted text (ANSI).
 	"""
 	from rich.console import Console
-	tmp_console = Console(file=None, highlight=False, color_system='truecolor')
+	tmp_console = Console(file=None, highlight=False)
 	with tmp_console.capture() as capture:
 		tmp_console.print(text, end='', soft_wrap=True)
 	return capture.get()
@@ -389,7 +389,7 @@ def rich_escape(obj):
 		any: Initial object, or escaped Rich string.
 	"""
 	if isinstance(obj, str):
-		return obj.replace('[', '\[').replace(']', '\]')
+		return obj.replace('[', r'\[').replace(']', r'\]')
 	return obj
 
 
