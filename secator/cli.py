@@ -19,8 +19,8 @@ from rich.table import Table
 from secator.config import CONFIG, ROOT_FOLDER, Config, default_config, config_path
 from secator.decorators import OrderedGroup, register_runner
 from secator.definitions import ADDONS_ENABLED, ASCII, DEV_PACKAGE, OPT_NOT_SUPPORTED, VERSION, STATE_COLORS
-from secator.installer import ToolInstaller, fmt_health_table_row, get_health_table, get_version_info
-from secator.output_types import FINDING_TYPES, Info, Error
+from secator.installer import ToolInstaller, fmt_health_table_row, get_health_table, get_version_info, get_distro_config
+from secator.output_types import FINDING_TYPES, Info, Warning, Error
 from secator.report import Report
 from secator.rich import console
 from secator.runners import Command, Runner
@@ -127,7 +127,7 @@ def worker(hostname, concurrency, reload, queue, pool, check, dev, stop, show):
 
 	# Check Celery addon is installed
 	if not ADDONS_ENABLED['worker']:
-		console.print('[bold red]Missing worker addon: please run [bold green4]secator install addons worker[/][/].')
+		console.print(Error(message='Missing worker addon: please run "secator install addons worker".'))
 		sys.exit(1)
 
 	# Check broken / backend addon is installed
@@ -135,7 +135,7 @@ def worker(hostname, concurrency, reload, queue, pool, check, dev, stop, show):
 	backend_protocol = CONFIG.celery.result_backend.split('://')[0]
 	if CONFIG.celery.broker_url:
 		if (broker_protocol == 'redis' or backend_protocol == 'redis') and not ADDONS_ENABLED['redis']:
-			console.print('[bold red]Missing `redis` addon: please run [bold green4]secator install addons redis[/][/].')
+			console.print(Error(message='Missing redis addon: please run "secator install addons redis".'))
 			sys.exit(1)
 
 	# Debug Celery config
@@ -214,7 +214,7 @@ def revshell(name, host, port, interface, listen, force):
 			console.print(Error(message=f'Interface "{interface}" could not be found. Run "ifconfig" to see the list of available interfaces'))  # noqa: E501
 			return
 		else:
-			console.print(Info(message=f'Detected host IP: [bold orange1]{host}[/]'))
+			console.print(Info(message=f'Detected host IP: {host}'))
 
 	# Download reverse shells JSON from repo
 	revshells_json = f'{CONFIG.dirs.revshells}/revshells.json'
@@ -389,81 +389,51 @@ def record(record_name, script, interactive, width, height, output_dir):
 		console.print(Info(message=f'Generated {output_gif_path}'))
 
 
-@util.group('build')
-def build():
-	"""Build secator."""
+@util.command('build')
+@click.option('--version', type=str, help='Override version specified in pyproject.toml')
+def build(version):
+	"""Build secator PyPI package."""
 	if not DEV_PACKAGE:
 		console.print(Error(message='You MUST use a development version of secator to make builds'))
 		sys.exit(1)
-	pass
-
-
-@build.command('pypi')
-def build_pypi():
-	"""Build secator PyPI package."""
 	if not ADDONS_ENABLED['build']:
-		console.print(Error(message='Missing build addon: please run [bold green4]secator install addons build[/]'))
+		console.print(Error(message='Missing build addon: please run "secator install addons build"'))
 		sys.exit(1)
+
+	# Update version in pyproject.toml if --version is explicitely passed
+	if version:
+		pyproject_toml_path = Path.cwd() / 'pyproject.toml'
+		if not pyproject_toml_path.exists():
+			console.print(Error(message='You must be in the secator root directory to make builds with --version'))
+			sys.exit(1)
+		console.print(Info(message=f'Updating version in pyproject.toml to {version}'))
+		with open(pyproject_toml_path, "r") as file:
+			content = file.read()
+		updated_content = re.sub(r'^\s*version\s*=\s*".*?"', f'version = "{version}"', content, flags=re.MULTILINE)
+		with open(pyproject_toml_path, "w") as file:
+			file.write(updated_content)
+
 	with console.status('[bold gold3]Building PyPI package...[/]'):
 		ret = Command.execute(f'{sys.executable} -m hatch build', name='hatch build', cwd=ROOT_FOLDER)
 		sys.exit(ret.return_code)
 
 
-@build.command('docker')
-@click.option('--tag', '-t', type=str, default=None, help='Specific tag')
-@click.option('--latest', '-l', is_flag=True, default=False, help='Latest tag')
-def build_docker(tag, latest):
-	"""Build secator Docker image."""
-	if not tag:
-		tag = VERSION if latest else 'dev'
-	cmd = f'docker build -t freelabz/secator:{tag}'
-	if latest:
-		cmd += ' -t freelabz/secator:latest'
-	cmd += ' .'
-	with console.status('[bold gold3]Building Docker image...[/]'):
-		ret = Command.execute(cmd, name='docker build', cwd=ROOT_FOLDER)
-		sys.exit(ret.return_code)
-
-
-@util.group('publish')
+@util.command('publish')
 def publish():
-	"""Publish secator."""
-	if not DEV_PACKAGE:
-		console.print('[bold red]You MUST use a development version of secator to publish builds.[/]')
-		sys.exit(1)
-	pass
-
-
-@publish.command('pypi')
-def publish_pypi():
 	"""Publish secator PyPI package."""
+	if not DEV_PACKAGE:
+		console.print(Error(message='You MUST use a development version of secator to publish builds.'))
+		sys.exit(1)
 	if not ADDONS_ENABLED['build']:
-		console.print('[bold red]Missing build addon: please run [bold green4]secator install addons build[/][/]')
+		console.print(Error(message='Missing build addon: please run "secator install addons build"'))
 		sys.exit(1)
 	os.environ['HATCH_INDEX_USER'] = '__token__'
 	hatch_token = os.environ.get('HATCH_INDEX_AUTH')
 	if not hatch_token:
-		console.print('[bold red]Missing PyPI auth token (HATCH_INDEX_AUTH env variable).')
+		console.print(Error(message='Missing PyPI auth token (HATCH_INDEX_AUTH env variable).'))
 		sys.exit(1)
 	with console.status('[bold gold3]Publishing PyPI package...[/]'):
 		ret = Command.execute(f'{sys.executable} -m hatch publish', name='hatch publish', cwd=ROOT_FOLDER)
-		sys.exit(ret.return_code)
-
-
-@publish.command('docker')
-@click.option('--tag', '-t', default=None, help='Specific tag')
-@click.option('--latest', '-l', is_flag=True, default=False, help='Latest tag')
-def publish_docker(tag, latest):
-	"""Publish secator Docker image."""
-	if not tag:
-		tag = VERSION if latest else 'dev'
-	cmd = f'docker push freelabz/secator:{tag}'
-	cmd2 = 'docker push freelabz/secator:latest'
-	with console.status(f'[bold gold3]Publishing Docker image {tag}...[/]'):
-		ret = Command.execute(cmd, name=f'docker push ({tag})', cwd=ROOT_FOLDER)
-		if latest:
-			ret2 = Command.execute(cmd2, name='docker push (latest)')
-			sys.exit(max(ret.return_code, ret2.return_code))
 		sys.exit(ret.return_code)
 
 
@@ -503,7 +473,7 @@ def config_set(key, value):
 			return
 		console.print(f'[bold green]:tada: Saved config to [/]{CONFIG._path}')
 	else:
-		console.print('[bold red]:x: Invalid config, not saving it.')
+		console.print(Error(message='Invalid config, not saving it.'))
 
 
 @config.command('edit')
@@ -699,13 +669,13 @@ def report_show(report_query, output, runner_type, time_delta, type, query, work
 					f'\n{path} ([bold blue]{runner_name}[/] [dim]{runner_type}[/]) ([dim]{file_date}[/]):')
 				if report.is_empty():
 					if len(paths) == 1:
-						console.print('[bold orange4]No results in report.[/]')
+						console.print(Warning(message='No results in report.'))
 					else:
-						console.print('[bold orange4]No new results since previous scan.[/]')
+						console.print(Warning(message='No new results since previous scan.'))
 					continue
 				report.send()
 			except json.decoder.JSONDecodeError as e:
-				console.print(f'[bold red]Could not load {path}: {str(e)}')
+				console.print(Error(message=f'Could not load {path}: {str(e)}'))
 
 	if unified:
 		console.print(f'\n:wrench: [bold gold3]Building report by crunching {len(all_results)} results ...[/]')
@@ -759,12 +729,12 @@ def report_list(workspace, runner_type, time_delta):
 				f"[{status_color}]{data['status']}[/]"
 			)
 		except json.JSONDecodeError as e:
-			console.print(f'[bold red]Could not load {path}: {str(e)}')
+			console.print(Error(message=f'Could not load {path}: {str(e)}'))
 
 	if len(paths) > 0:
 		console.print(table)
 	else:
-		console.print('[bold red]No results found.')
+		console.print(Error(message='No results found.'))
 
 
 @report.command('export')
@@ -888,11 +858,11 @@ def health(json, debug, strict):
 		error = False
 		for tool, info in status['tools'].items():
 			if not info['installed']:
-				console.print(Error(message=f'{tool} not installed and strict mode is enabled.[/]'))
+				console.print(Error(message=f'{tool} not installed and strict mode is enabled.'))
 				error = True
 		if error:
 			sys.exit(1)
-		console.print(Info(message='Strict healthcheck passed ![/]'))
+		console.print(Info(message='Strict healthcheck passed !'))
 
 
 #---------#
@@ -900,21 +870,25 @@ def health(json, debug, strict):
 #---------#
 
 
-def run_install(cmd, title, next_steps=None):
+def run_install(title=None, cmd=None, packages=None, next_steps=None):
 	if CONFIG.offline_mode:
-		console.print('[bold red]Cannot run this command in offline mode.[/]')
+		console.print(Error(message='Cannot run this command in offline mode.'))
 		return
 	with console.status(f'[bold yellow] Installing {title}...'):
-		ret = Command.execute(cmd, cls_attributes={'shell': True}, print_line=True)
-		if ret.return_code != 0:
-			console.print(Error(message=f'Failed to install {title}.'))
-		else:
-			console.print(Info(message=f'{title} installed successfully !'))
+		if cmd:
+			from secator.installer import SourceInstaller
+			status = SourceInstaller.install(cmd)
+		elif packages:
+			from secator.installer import PackageInstaller
+			status = PackageInstaller.install(packages)
+		return_code = 1
+		if status.is_ok():
+			return_code = 0
 			if next_steps:
 				console.print('[bold gold3]:wrench: Next steps:[/]')
 				for ix, step in enumerate(next_steps):
 					console.print(f'   :keycap_{ix}: {step}')
-		sys.exit(ret.return_code)
+		sys.exit(return_code)
 
 
 @cli.group()
@@ -1061,17 +1035,23 @@ def install_go():
 def install_ruby():
 	"""Install Ruby."""
 	run_install(
-		cmd='wget -O - https://raw.githubusercontent.com/freelabz/secator/main/scripts/install_ruby.sh | sudo sh',
+		packages={
+			'apt': ['ruby-full', 'rubygems'],
+			'apk': ['ruby', 'ruby-dev'],
+			'pacman': ['ruby', 'ruby-dev'],
+			'brew': ['ruby']
+		},
 		title='Ruby'
 	)
 
 
 @install.command('tools')
 @click.argument('cmds', required=False)
-def install_tools(cmds):
+@click.option('--cleanup', is_flag=True, default=False)
+def install_tools(cmds, cleanup):
 	"""Install supported tools."""
 	if CONFIG.offline_mode:
-		console.print('[bold red]Cannot run this command in offline mode.[/]')
+		console.print(Error(message='Cannot run this command in offline mode.'))
 		return
 	if cmds is not None:
 		cmds = cmds.split(',')
@@ -1080,13 +1060,29 @@ def install_tools(cmds):
 		tools = ALL_TASKS
 	tools.sort(key=lambda x: x.__name__)
 	return_code = 0
+	if not tools:
+		cmd_str = ' '.join(cmds)
+		console.print(Error(message=f'No tools found for {cmd_str}.'))
+		return
 	for ix, cls in enumerate(tools):
 		with console.status(f'[bold yellow][{ix + 1}/{len(tools)}] Installing {cls.__name__} ...'):
 			status = ToolInstaller.install(cls)
 			if not status.is_ok():
-				console.print(f'[bold red]Failed installing {cls.__name__}[/]')
 				return_code = 1
 		console.print()
+	if cleanup:
+		distro = get_distro_config()
+		cleanup_cmds = [
+			'go clean -cache',
+			'go clean -modcache',
+			'pip cache purge',
+			'gem cleanup --user-install',
+			'gem clean --user-install',
+		]
+		if distro.pm_finalizer:
+			cleanup_cmds.append(f'sudo {distro.pm_finalizer}')
+		cmd = ' && '.join(cleanup_cmds)
+		Command.execute(cmd, cls_attributes={'shell': True}, quiet=False)
 	sys.exit(return_code)
 
 
@@ -1099,22 +1095,22 @@ def install_tools(cmds):
 def update(all):
 	"""[dim]Update to latest version.[/]"""
 	if CONFIG.offline_mode:
-		console.print('[bold red]Cannot run this command in offline mode.[/]')
+		console.print(Error(message='Cannot run this command in offline mode.'))
 		sys.exit(1)
 
 	# Check current and latest version
-	info = get_version_info('secator', github_handle='freelabz/secator', version=VERSION)
+	info = get_version_info('secator', '-version', 'freelabz/secator', version=VERSION)
 	latest_version = info['latest_version']
 	do_update = True
 
 	# Skip update if latest
 	if info['status'] == 'latest':
-		console.print(f'[bold green]secator is already at the newest version {latest_version}[/] !')
+		console.print(Info(message=f'secator is already at the newest version {latest_version} !'))
 		do_update = False
 
 	# Fail if unknown latest
 	if not latest_version:
-		console.print('[bold red]Could not fetch latest secator version.[/]')
+		console.print(Error(message='Could not fetch latest secator version.'))
 		sys.exit(1)
 
 	# Update secator
@@ -1242,10 +1238,10 @@ def list_aliases(silent):
 def test():
 	"""[dim]Run tests."""
 	if not DEV_PACKAGE:
-		console.print('[bold red]You MUST use a development version of secator to run tests.[/]')
+		console.print(Error(message='You MUST use a development version of secator to run tests.'))
 		sys.exit(1)
 	if not ADDONS_ENABLED['dev']:
-		console.print('[bold red]Missing dev addon: please run [bold green4]secator install addons dev[/][/]')
+		console.print(Error(message='Missing dev addon: please run "secator install addons dev"'))
 		sys.exit(1)
 	pass
 

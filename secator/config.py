@@ -29,6 +29,7 @@ class StrictModel(BaseModel, extra='forbid'):
 
 class Directories(StrictModel):
 	bin: Directory = Path.home() / '.local' / 'bin'
+	share: Directory = Path.home() / '.local' / 'share'
 	data: Directory = Path(DATA_FOLDER)
 	templates: Directory = ''
 	reports: Directory = ''
@@ -61,9 +62,19 @@ class Celery(StrictModel):
 	broker_pool_limit: int = 10
 	broker_connection_timeout: float = 4.0
 	broker_visibility_timeout: int = 3600
+	broker_transport_options: str = ""
 	override_default_logging: bool = True
 	result_backend: StrExpandHome = ''
+	result_backend_transport_options: str = ""
 	result_expires: int = 86400  # 1 day
+	task_acks_late: bool = False
+	task_send_sent_event: bool = False
+	task_reject_on_worker_lost: bool = False
+	worker_max_tasks_per_child: int = 20
+	worker_prefetch_multiplier: int = 1
+	worker_send_task_events: bool = False
+	worker_kill_after_task: bool = False
+	worker_kill_after_idle_seconds: int = -1
 
 
 class Cli(StrictModel):
@@ -87,6 +98,7 @@ class Runners(StrictModel):
 class Security(StrictModel):
 	allow_local_file_access: bool = True
 	auto_install_commands: bool = True
+	force_source_install: bool = False
 
 
 class HTTP(StrictModel):
