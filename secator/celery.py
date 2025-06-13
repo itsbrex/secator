@@ -1,8 +1,6 @@
-import gc
 import json
 import logging
 import os
-import uuid
 
 from time import time
 
@@ -101,6 +99,8 @@ if IN_CELERY_WORKER_PROCESS:
 def update_state(celery_task, task, force=False):
 	"""Update task state to add metadata information."""
 	if not IN_CELERY_WORKER_PROCESS:
+		return
+	if task.no_live_updates:
 		return
 	if not force and not should_update(CONFIG.runners.backend_update_frequency, task.last_updated_celery):
 		return
@@ -210,25 +210,46 @@ def run_command(self, results, name, targets, opts={}):
 		return self.replace(tasks)
 
 	# Update state live
-	[update_state(self, task) for _ in task]
+	for _ in task:
+		update_state(self, task)
 	update_state(self, task, force=True)
 
-	# Garbage collection to save RAM
-	gc.collect()
-
+	if CONFIG.addons.mongodb.enabled:
+		return [r._uuid for r in task.results]
 	return task.results
 
 
 @app.task
 def forward_results(results):
+	"""Forward results to the next task (bridge task).
+
+	Args:
+		results (list): Results to forward.
+
+	Returns:
+		list: List of uuids.
+	"""
 	if isinstance(results, list):
 		for ix, item in enumerate(results):
 			if isinstance(item, dict) and 'results' in item:
 				results[ix] = item['results']
 	elif 'results' in results:
 		results = results['results']
+
+	if IN_CELERY_WORKER_PROCESS:
+		console.print(Info(message=f'Deduplicating {len(results)} results'))
+
 	results = flatten(results)
-	results = deduplicate(results, attr='_uuid')
+	if CONFIG.addons.mongodb.enabled:
+		uuids = [r._uuid for r in results if hasattr(r, '_uuid')]
+		uuids.extend([r for r in results if isinstance(r, str)])
+		results = list(set(uuids))
+	else:
+		results = deduplicate(results, attr='_uuid')
+
+	if IN_CELERY_WORKER_PROCESS:
+		console.print(Info(message=f'Forwarded {len(results)} flattened and deduplicated results'))
+
 	return results
 
 
@@ -244,12 +265,18 @@ def mark_runner_started(results, runner, enable_hooks=True):
 	Returns:
 		list: Runner results
 	"""
+	if IN_CELERY_WORKER_PROCESS:
+		console.print(Info(message=f'Runner {runner.unique_name} has started, running mark_started'))
 	debug(f'Runner {runner.unique_name} has started, running mark_started', sub='celery')
 	if results:
-		runner.results = forward_results(results)
+		results = forward_results(results)
 	runner.enable_hooks = enable_hooks
-	if not runner.dry_run:
-		runner.mark_started()
+	if CONFIG.addons.mongodb.enabled:
+		from secator.hooks.mongodb import get_results
+		results = get_results(results)
+	for item in results:
+		runner.add_result(item, print=False)
+	runner.mark_started()
 	return runner.results
 
 
@@ -265,12 +292,17 @@ def mark_runner_completed(results, runner, enable_hooks=True):
 	Returns:
 		list: Final results
 	"""
+	if IN_CELERY_WORKER_PROCESS:
+		console.print(Info(message=f'Runner {runner.unique_name} has finished, running mark_completed'))
 	debug(f'Runner {runner.unique_name} has finished, running mark_completed', sub='celery')
 	results = forward_results(results)
 	runner.enable_hooks = enable_hooks
-	if not runner.dry_run:
-		[runner.add_result(item) for item in results]
-		runner.mark_completed()
+	if CONFIG.addons.mongodb.enabled:
+		from secator.hooks.mongodb import get_results
+		results = get_results(results)
+	for item in results:
+		runner.add_result(item, print=False)
+	runner.mark_completed()
 	return runner.results
 
 
@@ -316,27 +348,24 @@ def break_task(task, task_opts, results=[]):
 		# Add chunk info to opts
 		opts = base_opts.copy()
 		opts.update({'chunk': ix + 1, 'chunk_count': len(chunks)})
-
-		# Chunk results if needed for extractors to work
-		if opts.get('chunk_by'):  # remove results that have a different chunk_by value
-			_type, attr = opts['chunk_by'].split('.')
-			chunked_results = [
-				r for r in results
-				if not (r._type == _type and getattr(r, attr) not in chunk)
-			]
-		else:
-			chunked_results = results
-		debug('', obj={task.unique_name: 'CHUNKED', 'chunked_targets': chunk, 'chunked_results': chunked_results}, sub='celery.state')  # noqa: E501
+		debug('', obj={
+			task.unique_name: 'CHUNK',
+			'chunk': f'{ix + 1} / {len(chunks)}',
+			'target_count': len(chunk),
+			'targets': chunk
+		}, sub='celery.state')  # noqa: E501
 
 		# Construct chunked signature
-		task_id = str(uuid.uuid4())
 		opts['has_parent'] = True
 		opts['enable_duplicate_check'] = False
-		opts['results'] = chunked_results
-		sig = type(task).si(chunk, **opts).set(task_id=task_id)
+		opts['results'] = results
+		if 'targets_' in opts:
+			del opts['targets_']
+		sig = type(task).si(chunk, **opts)
+		task_id = sig.freeze().task_id
 		full_name = f'{task.name}_{ix + 1}'
 		task.add_subtask(task_id, task.name, full_name)
-		info = Info(message=f'Celery chunked task created: {task_id}', _source=full_name, _uuid=str(uuid.uuid4()))
+		info = Info(message=f'Celery chunked task created: {task_id}')
 		task.add_result(info)
 		sigs.append(sig)
 

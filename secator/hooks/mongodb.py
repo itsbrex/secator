@@ -6,7 +6,7 @@ from bson.objectid import ObjectId
 from celery import shared_task
 
 from secator.config import CONFIG
-from secator.output_types import FINDING_TYPES
+from secator.output_types import OUTPUT_TYPES
 from secator.runners import Scan, Task, Workflow
 from secator.utils import debug, escape_mongodb_url
 
@@ -46,6 +46,28 @@ def get_runner_dbg(runner):
 	}
 
 
+def get_results(uuids):
+	"""Get results from MongoDB based on a list of uuids.
+
+	Args:
+		uuids (list[str | Output]): List of uuids, but can also be a mix of uuids and output types.
+
+	Returns:
+		Generator of findings.
+	"""
+	client = get_mongodb_client()
+	db = client.main
+	del_uuids = []
+	for r in uuids:
+		if isinstance(r, tuple(OUTPUT_TYPES)):
+			yield r
+			del_uuids.append(r)
+	uuids = [ObjectId(u) for u in uuids if u not in del_uuids and ObjectId.is_valid(u)]
+	for r in db.findings.find({'_id': {'$in': uuids}}):
+		finding = load_finding(r)
+		yield finding
+
+
 def update_runner(self):
 	client = get_mongodb_client()
 	db = client.main
@@ -78,7 +100,7 @@ def update_runner(self):
 
 
 def update_finding(self, item):
-	if type(item) not in FINDING_TYPES:
+	if type(item) not in OUTPUT_TYPES:
 		return item
 	start_time = time.time()
 	client = get_mongodb_client()
@@ -120,7 +142,7 @@ def find_duplicates(self):
 def load_finding(obj):
 	finding_type = obj['_type']
 	klass = None
-	for otype in FINDING_TYPES:
+	for otype in OUTPUT_TYPES:
 		if finding_type == otype.get_name():
 			klass = otype
 			item = klass.load(obj)
@@ -147,13 +169,11 @@ def tag_duplicates(ws_id: str = None):
 	workspace_query = list(
 		db.findings.find({'_context.workspace_id': str(ws_id), '_tagged': True}).sort('_timestamp', -1))
 	untagged_query = list(
-		db.findings.find({'_context.workspace_id': str(ws_id)}).sort('_timestamp', -1))
-	# TODO: use this instead when duplicate removal logic is final
-	# untagged_query = list(
-	# 	db.findings.find({'_context.workspace_id': str(ws_id), '_tagged': False}).sort('_timestamp', -1))
+		db.findings.find({'_context.workspace_id': str(ws_id), '_tagged': {'$ne': True}}).sort('_timestamp', -1))
 	if not untagged_query:
 		debug('no untagged findings. Skipping.', id=ws_id, sub='hooks.mongodb')
 		return
+	debug(f'found {len(untagged_query)} untagged findings', id=ws_id, sub='hooks.mongodb')
 
 	untagged_findings = load_findings(untagged_query)
 	workspace_findings = load_findings(workspace_query)
