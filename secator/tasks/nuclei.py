@@ -47,7 +47,7 @@ class nuclei(VulnMulti):
 		'hang_monitor': {'is_flag': True, 'short': 'hm', 'default': True, 'help': 'Enable nuclei hang monitoring'},
 		'headless_bulk_size': {'type': int, 'short': 'hbs', 'help': 'Maximum number of headless hosts to be analzyed in parallel per template'},  # noqa: E501
 		'input_mode': {'type': str, 'short': 'im', 'help': 'Mode of input file (list, burp, jsonl, yaml, openapi, swagger)'},
-		'logs': {'is_flag': True, 'internal': True, 'display': True, 'help': 'Log errors (-elog) and traces (-tlog) to output dir'},
+		'logs': {'is_flag': True, 'internal': True, 'display': True, 'help': 'Log errors (-elog) and traces (-tlog) to output dir'},  # noqa: E501
 		'new_templates': {'type': str, 'short': 'nt', 'help': 'Run only new templates added in latest nuclei-templates release'},  # noqa: E501
 		'omit_raw': {'is_flag': True, 'short': 'or', 'default': True, 'help': 'Omit requests/response pairs in the JSON, JSONL, and Markdown outputs (for findings only)'},  # noqa: E501
 		'response_size_read': {'type': int, 'default': CONFIG.http.response_max_size_bytes, 'help': 'Max body size to read (bytes)'},  # noqa: E501
